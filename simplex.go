@@ -9,10 +9,8 @@ import (
 
 type simplex struct {
 	// Описание условия задачи
-	targetF []float64 // коэффициенты при переменных целевой функции (ЦФ)
-	//targetFTerm float64     // свободный член ЦФ
-	// if everything works out, I'll leave targetFValue
-	targetFValue float64     // текущее значение ЦФ
+	targetF      []float64   // коэффициенты при переменных целевой функции (ЦФ)
+	targetFValue float64     // свободный член и текущее значение ЦФ
 	argsMatrix   [][]float64 // коэффициенты при аргументах системы ограничений (СО)
 	baseValues   []float64   // значения базисных переменных (свободных членов СО)
 	min          bool        // экстремум ЦФ: true - min, false - max
@@ -44,14 +42,6 @@ func (s *simplex) convertToPreferredView() {
 			s.baseValues[i] = -v
 		}
 	}
-	//for j:=0;j<len(s.argsMatrix);j++{}
-	//var added uint
-	//getAppendingArray := func() []float64 {
-	//	arr := make([]float64, len(s.argsMatrix))
-	//	// Единица на месте соответствующей искусственной переменной
-	//	arr[added] = 1
-	//	return arr
-	//}
 	// Добавляем искусственный базис
 	m := len(s.argsMatrix)
 	// Получаем список значений для вставки в строку-ограничение (вынесено из цикла для оптимизации)
@@ -63,26 +53,19 @@ func (s *simplex) convertToPreferredView() {
 		s.argsMatrix[added] = append(row, arr...)
 		// Обнулить для последующей итерации
 		arr[added] = 0
-		//added++
 		// Делаем переменную базисной
 		s.baseNumbers[added] = len(row) + added + 1
-		//if added < m-1 {
-		// Нельзя получить константную длину, поэтому приходится брать длину след. строки
-		//s.baseNumbers[added] = len(s.argsMatrix[m-1]) + added + 1
-		//continue
-		//}
-		// В последнем ограничении номер баз. перем. равен текущей длине
-		//s.baseNumbers[added] = len(row)
 	}
-	// todo what to do with s.targetF? Should I add synthetic vars with 0?
 }
 
+// myMap Выполнить функцию на всех элементах массива
 func myMap[T any](arr []T, f func(T) T) {
 	for i, v := range arr {
 		arr[i] = f(v)
 	}
 }
 
+// printTable Печать таблицы
 func (s *simplex) printTable() {
 	// Под каждое значение необходимо выделить по 6 символов: знак, 2 до, точка, 2 после
 	// Исключения - i, Base
@@ -186,29 +169,26 @@ func (s *simplex) printTable() {
 	fmt.Println()
 }
 
-// isOptimal Проверяет план на оптимальность (SRP важнее производительности в данный момент)
-func (s *simplex) isOptimal() bool {
-	if s.min {
-		// при поиске минимума ЦФ план оптимален, если все значения <=0
-		for _, v := range s.delta {
-			if v > 0 {
-				return false
+// getDirectiveColNumber - возвращает номер направляющего столбца, начиная с 0
+func (s *simplex) getDirectiveColNumber() (number int) {
+	// Ищем отрицательный минимум среди значений базисных пер.
+	if n := s.getMinBaseValueNumber(); s.baseValues[n] < 0 {
+		min := math.MaxFloat64
+		// Ищем "псевдо-theta"
+		for j := 0; j < len(s.delta); j++ {
+			// Делим все элементы строки на найденный отр. мин.
+			if v := s.argsMatrix[n][j] / s.baseValues[n]; v > 0 && v < min {
+				// Выбираем положительный минимум
+				min = v
+				number = j
 			}
 		}
-	} else {
-		// при поиске максимума - все >=0
-		for _, v := range s.delta {
-			if v < 0 {
-				return false
-			}
+		if min == math.MaxFloat64 {
+			return -1
 		}
+		return
 	}
-	return true
-}
-
-// getDirectiveColumnNumber - возвращает номер направляющего, начиная с 0
-func (s *simplex) getDirectiveColumnNumber() (number int) {
-	// к-во неискусственных переменных
+	// К-во неискусственных переменных
 	n := len(s.argsMatrix[0]) - len(s.argsMatrix)
 	var syntheticVarsInBase bool
 	// Проверяем наличие иск. пер. в базисе
@@ -285,9 +265,8 @@ func (s *simplex) setDeltas() {
 	// Если выразить остальные переменные через искусственные, то коэф.
 	// при каждой из первых будет равен инвертированной сумме коэф.
 	// во всех ограничениях, а свободный член будет инвертирован
-	//coefs := make([]float64, n+1)
-	// Устанавливаем свободный член
 	for _, v := range s.baseValues {
+		// Устанавливаем свободный член
 		s.deltaM[0] -= v
 	}
 	// Инвертируем сумму значений для соответствующих переменных
@@ -296,11 +275,15 @@ func (s *simplex) setDeltas() {
 			s.deltaM[j] -= s.argsMatrix[i][j-1]
 		}
 	}
-	// Искусственные переменные остаются нулевыми
 }
 
 // getDirectiveRowNumber Номер направляющей строки, начиная с 0
 func (s *simplex) getDirectiveRowNumber(resColNumber int) (number int) {
+	// Если есть строка с отр. мин. среди баз. пер., вернуть её номер
+	if n := s.getMinBaseValueNumber(); s.baseValues[n] < 0 {
+		// Если он есть, соотв. строка будет направл.
+		return n
+	}
 	s.theta = make([]float64, len(s.argsMatrix))
 	// В первую очередь выведем искусственные переменные
 	for i, v := range s.baseNumbers {
@@ -338,6 +321,21 @@ func (s *simplex) getDirectiveRowNumber(resColNumber int) (number int) {
 		os.Exit(0)
 	}
 	return
+}
+
+// getMinBaseValueNumber Получить номер минимума среди значений базисных перем.
+func (s *simplex) getMinBaseValueNumber() int {
+	var (
+		res int
+		min float64
+	)
+	for i, v := range s.baseValues {
+		if v < min {
+			min = v
+			res = i
+		}
+	}
+	return res
 }
 
 // setZerosInColumn Путём матричных преобразований получить нули в направляющем столбце
@@ -398,13 +396,6 @@ func (s *simplex) newBase(popped, pushed int) {
 		s.baseValues[popped] /= v
 	}
 	s.baseNumbers[popped] = pushed + 1
-	// Ищем выводимую переменную и вводим новую на её место
-	//for i, v := range s.baseNumbers {
-	//	if v == popped+1 {
-	//		s.baseNumbers[i] = pushed + 1
-	//		break
-	//	}
-	//}
 }
 
 // Solve Собственно решение задачи
@@ -419,7 +410,7 @@ func (s *simplex) Solve() {
 	fmt.Print("\nНайдены оценки:")
 	s.printTable()
 	// Проверим, что план не оптимален
-	if resCol := s.getDirectiveColumnNumber(); resCol != -1 {
+	if resCol := s.getDirectiveColNumber(); resCol != -1 {
 		fmt.Println("\nПлан неоптимален, пытаемся улучшить")
 		for i := 1; resCol != -1; i++ {
 			resRow := s.getDirectiveRowNumber(resCol)
@@ -430,12 +421,7 @@ func (s *simplex) Solve() {
 			fmt.Print("Установлен базис:")
 			s.printTable()
 			// Вычисляем след. напр. столбец
-			resCol = s.getDirectiveColumnNumber()
-			// note выход из бесконечного цикла (отладка)
-			if i >= 10 {
-				fmt.Println("слишком много итераций")
-				return
-			}
+			resCol = s.getDirectiveColNumber()
 		}
 	} else {
 		fmt.Println("\nПлан уже оптимален")
