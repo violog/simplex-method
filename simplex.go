@@ -169,15 +169,15 @@ func (s *simplex) printTable() {
 	fmt.Println()
 }
 
-// getDirectiveColNumber - возвращает номер направляющего столбца, начиная с 0
+// getDirectiveColNumber Возвращает номер направляющего столбца, начиная с 0
 func (s *simplex) getDirectiveColNumber() (number int) {
 	// Ищем отрицательный минимум среди значений базисных пер.
 	if n := s.getMinBaseValueNumber(); s.baseValues[n] < 0 {
 		min := math.MaxFloat64
 		// Ищем "псевдо-theta"
 		for j := 0; j < len(s.delta); j++ {
-			// Делим все элементы строки на найденный отр. мин.
-			if v := s.argsMatrix[n][j] / s.baseValues[n]; v > 0 && v < min {
+			// Делим найденный отр. мин. на все элементы строки
+			if v := s.baseValues[n] / s.argsMatrix[n][j]; v > 0 && v < min {
 				// Выбираем положительный минимум
 				min = v
 				number = j
